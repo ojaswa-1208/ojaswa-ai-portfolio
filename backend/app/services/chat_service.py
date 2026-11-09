@@ -1,4 +1,3 @@
-
 from functools import lru_cache
 
 from groq import AsyncGroq
@@ -84,8 +83,6 @@ You represent a professional AI Engineer portfolio.
 
 
 def is_project_question(message: str) -> bool:
-    """Identify questions that need project-specific retrieval."""
-
     text = message.lower()
 
     project_keywords = (
@@ -114,16 +111,23 @@ async def generate_chat_response(
     message: str,
     history: list,
 ) -> dict:
-    """Generate an answer grounded in Ojaswa's portfolio knowledge."""
 
     if not settings.GROQ_API_KEY:
         raise ChatServiceError("AI service is not configured.")
 
+    logger.info("chat_generation_started")
+
     try:
         project_question = is_project_question(message)
 
+        logger.info(
+            "chat_question_classified",
+            project_question=project_question,
+        )
+
         if project_question:
-            # Project questions search the complete project document.
+            logger.info("project_retrieval_started")
+
             chunks = await run_in_threadpool(
                 retrieve_relevant_chunks,
                 message,
@@ -132,13 +136,18 @@ async def generate_chat_response(
                 "projects.md",
             )
 
-            # Restore original document order for complete context.
             chunks.sort(
                 key=lambda chunk: chunk.get("chunk_index", -1)
             )
 
+            logger.info(
+                "project_retrieval_completed",
+                result_count=len(chunks),
+            )
+
         else:
-            # Normal retrieval for other portfolio questions.
+            logger.info("general_retrieval_started")
+
             chunks = await run_in_threadpool(
                 retrieve_relevant_chunks,
                 message,
@@ -146,9 +155,22 @@ async def generate_chat_response(
                 0.30,
             )
 
+            logger.info(
+                "general_retrieval_completed",
+                result_count=len(chunks),
+            )
+
+        logger.info("context_build_started")
         context = build_context(chunks)
 
+        logger.info(
+            "context_build_completed",
+            context_length=len(context),
+        )
+
         if not context.strip():
+            logger.warning("chat_context_empty")
+
             return {
                 "answer": (
                     "I don't have enough verified portfolio "
@@ -158,7 +180,9 @@ async def generate_chat_response(
                 "sources": [],
             }
 
+        logger.info("groq_client_initializing")
         client = get_groq_client()
+        logger.info("groq_client_ready")
 
         messages = [
             {
@@ -167,7 +191,6 @@ async def generate_chat_response(
             }
         ]
 
-        # Include the validated conversation history.
         for item in history:
             messages.append(
                 {
@@ -205,12 +228,16 @@ is split across multiple source chunks.
             }
         )
 
+        logger.info("groq_request_started")
+
         response = await client.chat.completions.create(
             model=settings.GROQ_MODEL,
             messages=messages,
             temperature=0.3,
             max_tokens=900,
         )
+
+        logger.info("groq_request_completed")
 
         answer = response.choices[0].message.content
 
@@ -225,6 +252,11 @@ is split across multiple source chunks.
                 for chunk in chunks
                 if chunk.get("source_name")
             }
+        )
+
+        logger.info(
+            "chat_generation_completed",
+            source_count=len(sources),
         )
 
         return {
