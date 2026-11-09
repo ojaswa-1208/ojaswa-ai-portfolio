@@ -1,14 +1,17 @@
 
 from functools import lru_cache
 
-from sentence_transformers import SentenceTransformer
-
-from app.config import settings
-
 
 @lru_cache(maxsize=1)
-def get_embedding_model() -> SentenceTransformer:
-    """Load the embedding model once and reuse it."""
+def get_embedding_model():
+    """
+    Load the embedding model only when an embedding is requested.
+    This prevents PyTorch and SentenceTransformers from loading
+    during FastAPI startup.
+    """
+    from sentence_transformers import SentenceTransformer
+
+    from app.config import settings
 
     return SentenceTransformer(settings.EMBEDDING_MODEL)
 
@@ -18,6 +21,8 @@ def generate_embedding(text: str) -> list[float]:
 
     if not text or not text.strip():
         raise ValueError("Cannot generate an embedding from empty text.")
+
+    from app.config import settings
 
     model = get_embedding_model()
 
@@ -47,6 +52,8 @@ def generate_embeddings(texts: list[str]) -> list[list[float]]:
 
     if any(not text.strip() for text in texts):
         raise ValueError("All documents must contain non-empty text.")
+
+    from app.config import settings
 
     model = get_embedding_model()
 
